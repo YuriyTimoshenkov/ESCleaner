@@ -1,1 +1,1 @@
-# Logging
+# Elastic search indexes cleaner
