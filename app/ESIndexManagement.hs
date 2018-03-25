@@ -30,6 +30,7 @@ import           Network.HTTP.Types.Status
 import           CustomException
 import           CustomLogging
 import           Threading
+import           Control.Concurrent.Async
 
 
 data ELKIndex = ELKIndex { name :: T.Text, date :: Day } deriving (Show)
@@ -77,17 +78,17 @@ loadIndexListWeb url = do
 
 deleteIndex :: String -> ELKIndex -> LT.LoggingT IO ThreadId
 deleteIndex url index = do
-  -- $(LT.logInfoSH) $ "Before index removal " ++ (show index)
-  -- initReq <- parseRequest $ url ++ T.unpack (name index)
-  -- let request = initReq
-  --           { method = "DELETE"
-  --           }
-  -- manager <- lift $ newManager tlsManagerSettings
-  -- response <- httpLbs request manager
-  -- if responseStatus response /= status200
-  --   then throw $ YTBusinessException $ T.pack ("Error deleting index " ++ (show index) ++ ". Status code = " ++ (show $ responseStatus response))
-  --   else return ()
-  -- $(LT.logInfoSH) $ "Response statues: " ++ (show $ responseStatus response)
+  $(LT.logInfoSH) $ "Before index removal " ++ (show index)
+  initReq <- parseRequest $ url ++ T.unpack (name index)
+  let request = initReq
+            { method = "DELETE"
+            }
+  manager <- lift $ newManager tlsManagerSettings
+  response <- httpLbs request manager
+  if responseStatus response /= status200
+    then throw $ YTBusinessException $ T.pack ("Error deleting index " ++ (show index) ++ ". Status code = " ++ (show $ responseStatus response))
+    else return ()
+  $(LT.logInfoSH) $ "Response statues: " ++ (show $ responseStatus response)
   $(LT.logInfoSH) $ "Index " ++ (T.unpack $ name index) ++ " deleted"
   lift myThreadId
 
@@ -105,11 +106,10 @@ removeOldIndexes loggingRunner = do
 
     currentDateTime <- liftIO getCurrentTime
     indexList <- return $ filterIndexesOlderThenMonth indexList minAgeOfIndexInDays currentDateTime
-    --indexList <- return [head indexList]
     $(LT.logInfoSH) $ "Filtered indexes: " <> show indexList
 
-    threadAwaiters <- liftIO $ mapM (forkIOWithAwaiter . loggingRunner . deleteIndex elkUrl) indexList
-    finishedThreadIds <- liftIO $ mapM (\awaiter -> takeMVar awaiter) threadAwaiters
+    threadAwaiters <- liftIO $ mapM (run . loggingRunner . deleteIndex elkUrl :: ELKIndex -> IO (AsyncResult (Async ThreadId))) indexList
+    finishedThreadIds <- liftIO $ mapM (\awaiter -> Threading.wait awaiter) threadAwaiters
 
     $(LT.logInfoSH) $ "Finished threads: " <> show finishedThreadIds
 
